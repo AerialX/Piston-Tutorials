@@ -10,6 +10,9 @@ authors = [
 [[bin]]
 name = "game"
 
+[profile.release]
+opt-level = 1
+
 [dependencies.piston]
 git = "https://github.com/PistonDevelopers/piston.git"
 

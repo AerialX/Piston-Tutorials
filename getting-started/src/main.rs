@@ -1,12 +1,14 @@
+#![feature(libc)]
+
 extern crate piston;
 extern crate graphics;
 extern crate sdl2_window;
 extern crate opengl_graphics;
+extern crate libc;
 
 use std::cell::RefCell;
 use piston::window::WindowSettings;
 use piston::event::{
-    events,
     RenderArgs,
     RenderEvent,
     UpdateArgs,
@@ -53,26 +55,63 @@ impl App {
 }
 
 fn main() {
+    let opengl = OpenGL::WebGL_1_0;
     // Create an SDL window.
     let window = Window::new(
-        OpenGL::_3_2,
-        WindowSettings::default()
+        opengl,
+        WindowSettings::default(),
     );
     let window = RefCell::new(window);
 
     // Create a new game and run it.
     let mut app = App {
-        gl: GlGraphics::new(OpenGL::_3_2),
-        rotation: 0.0
+        gl: GlGraphics::new(opengl),
+        rotation: 0.0,
     };
 
-    for e in events(&window) {
-        if let Some(r) = e.render_args() {
-            app.render(&mut window.borrow_mut(), &r);
-        }
+    emscripten_main_loop(move || {
+        app.update(&mut window.borrow_mut(), &UpdateArgs { dt: 1.0 / 30.0 });
+        app.render(&mut window.borrow_mut(), &RenderArgs { ext_dt: 0.0, width: 640, height: 480 });
+    }, 30, false);
 
-        if let Some(u) = e.update_args() {
-            app.update(&mut window.borrow_mut(), &u);
-        }
+    // Make sure these stay linked in because yay LLVM intrinsics
+    llvm_sin_f64(0.0);
+    llvm_cos_f64(0.0);
+}
+
+thread_local!(static MAIN_LOOP: RefCell<Option<Box<FnMut()>>> = RefCell::new(None));
+fn emscripten_main_loop<F: FnMut() + 'static>(f: F, fps: usize, simulate_infinite_loop: bool) {
+    MAIN_LOOP.with(|v| *v.borrow_mut() = Some(Box::new(f) as Box<FnMut()>));
+    unsafe {
+        emscripten_set_main_loop(emscripten_main_loop_, fps as libc::c_int, simulate_infinite_loop);
+    }
+}
+
+extern "C" fn emscripten_main_loop_() {
+    MAIN_LOOP.with(|v| if let Some(f) = v.borrow_mut().as_mut() {
+        f();
+    });
+}
+
+extern {
+    fn sin(v: f64) -> f64;
+    fn cos(v: f64) -> f64;
+
+    fn emscripten_set_main_loop(f: extern "C" fn(), fps: libc::c_int, simulate_infinite_loop: bool);
+}
+
+#[no_mangle]
+#[inline(never)]
+pub extern fn llvm_sin_f64(v: f64) -> f64 {
+    unsafe {
+        sin(v)
+    }
+}
+
+#[no_mangle]
+#[inline(never)]
+pub extern fn llvm_cos_f64(v: f64) -> f64 {
+    unsafe {
+        cos(v)
     }
 }
